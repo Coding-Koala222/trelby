@@ -990,10 +990,15 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
 
                 if self._isCharacterElementStart(i):
                     text = self.getCharacterTextForDisplay(i, tt.isCaps)
-                elif tt.isCaps:
-                    text = util.upper(line.text)
+                elif (line.lt == CHARACTER) and self.isFirstLineOfElem(i):
+                    text = self.getCharacterTextForDisplay(
+                        i, forExportCaps=forPDF or tt.isCaps
+                    )
                 else:
-                    text = line.text
+                    if tt.isCaps:
+                        text = util.upper(line.text)
+                    else:
+                        text = line.text
 
                 if tt.isBold:
                     typ |= pml.BOLD
@@ -1548,6 +1553,75 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
                 return s
 
             line -= 1
+
+    def _normalizeSpeakerName(self, s):
+        # Normalize speaker names for continuation comparisons.
+        # Keep strict semantics: JOHN != JOHN (V.O.)
+        # Only strip continuation suffixes.
+        t = util.upper((s or "").strip())
+        t = re.sub(r"\s+\((CONT'D|CONTINUED)\)\s*$", "", t)
+        return t.strip()
+
+    def _isCharacterElementStart(self, line):
+        if line < 0 or line >= len(self.lines):
+            return False
+        return (self.lines[line].lt == CHARACTER) and self.isFirstLineOfElem(line)
+
+    def _findPreviousCharacterInScene(self, line):
+        # Walk previous elements, stop at scene/act boundary.
+        i = self.getElemFirstIndexFromLine(line) - 1
+
+        while i >= 0:
+            first = self.getElemFirstIndexFromLine(i)
+            lt = self.lines[first].lt
+
+            if lt in (SCENE, ACTBREAK):
+                return None
+
+            if lt == CHARACTER:
+                return first
+
+            i = first - 1
+
+        return None
+
+    def shouldAddDialogueContinuedForCharacter(self, line):
+        # Add continuation when same character speaks again after
+        # intervening content within the same scene.
+        if not self._isCharacterElementStart(line):
+            return False
+
+        cur_last = self.getElemLastIndexFromLine(line)
+        cur_text = self.lines[cur_last].text
+
+        if re.search(r"\((cont'd|continued)\)\s*$", cur_text, re.IGNORECASE):
+            return False
+
+        prev_char_line = self._findPreviousCharacterInScene(line)
+        if prev_char_line is None:
+            return False
+
+        cur_first = self.getElemFirstIndexFromLine(line)
+        prev_last = self.getElemLastIndexFromLine(prev_char_line)
+
+        # Require at least one element between the two CHARACTER cues.
+        if cur_first <= (prev_last + 1):
+            return False
+
+        prev_text = self.lines[self.getElemLastIndexFromLine(prev_char_line)].text
+
+        return self._normalizeSpeakerName(cur_text) == self._normalizeSpeakerName(prev_text)
+
+    def getCharacterTextForDisplay(self, line, forExportCaps=False):
+        text = self.lines[line].text
+
+        if self._isCharacterElementStart(line) and self.shouldAddDialogueContinuedForCharacter(line):
+            if not re.search(r"\((cont'd|continued)\)\s*$", text, re.IGNORECASE):
+                text += self.cfg.strDialogueContinued
+
+        if forExportCaps and self.cfg.getType(CHARACTER).export.isCaps:
+            text = util.upper(text)
+        return text
 
     def _hasDialogueContinuationSuffix(self, s):
         s = util.upper(s).strip()
