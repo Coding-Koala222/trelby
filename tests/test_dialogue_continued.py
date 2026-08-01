@@ -1,5 +1,6 @@
 import tests.u as u
 import trelby.screenplay as scr
+import trelby.viewmode as viewmode
 from trelby.line import Line
 
 
@@ -96,3 +97,43 @@ def testDisplayTextUsesExportCapsWithoutUppercasingContinuation():
     )
 
     assert sp.getCharacterTextForDisplay(4, True) == "JOHN (cont'd)"
+
+
+def testDraftViewUsesDisplayTextForRepeatedCharacterCue():
+    sp = _mksp(
+        [
+            Line(scr.LB_LAST, scr.SCENE, "INT. ROOM - DAY"),
+            Line(scr.LB_LAST, scr.CHARACTER, "JOHN"),
+            Line(scr.LB_LAST, scr.DIALOGUE, "First line."),
+            Line(scr.LB_LAST, scr.ACTION, "He sits."),
+            Line(scr.LB_LAST, scr.CHARACTER, "JOHN"),
+            Line(scr.LB_LAST, scr.DIALOGUE, "Second line."),
+        ]
+    )
+
+    class _DummyFi:
+        fx = 1
+
+    class _DummyCfgGui:
+        def tt2fi(self, _tt):
+            return _DummyFi()
+
+    class _DummyCtrl:
+        def __init__(self, screenplay):
+            self.sp = screenplay
+            self.mm2p = 1
+            self.pageW = 100
+            self._cfgGui = _DummyCfgGui()
+
+        def GetClientSize(self):
+            return (800, 600)
+
+        def getCfgGui(self):
+            return self._cfgGui
+
+    texts, _ = viewmode.ViewModeDraft().getScreen(_DummyCtrl(sp), doExtra=True)
+    line_texts = {t.line: t.text for t in texts}
+
+    assert line_texts[1] == "JOHN"
+    assert line_texts[4] == "JOHN (cont'd)"
+    assert sp.lines[4].text == "JOHN"
