@@ -1614,7 +1614,11 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
     def getCharacterTextForDisplay(self, line, forExportCaps=False):
         text = self.lines[line].text
 
-        text = util.upper(text)
+        if self._hasDialogueContinuationSuffix(text):
+            text = self._normalizeSpeakerName(text)
+            text = util.upper(text) + self.cfg.strDialogueContinued
+        else:
+            text = util.upper(text)
 
         if self.shouldAddDialogueContinuedForCharacter(line):
             text += self.cfg.strDialogueContinued
