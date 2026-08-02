@@ -35,40 +35,53 @@ jobs:
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            wine64 wine32 winbind xvfb cabextract unzip p7zip-full wget curl
+            wine wine64 wine32 winbind xvfb cabextract unzip p7zip-full wget curl
 
-      - name: Verify Wine binaries
+      - name: Detect wine executable
+        id: winebin
+        shell: bash
         run: |
-          command -v wine64
-          wine64 --version
+          if command -v wine >/dev/null 2>&1; then
+            echo "cmd=wine" >> "$GITHUB_OUTPUT"
+          elif command -v wine64 >/dev/null 2>&1; then
+            echo "cmd=wine64" >> "$GITHUB_OUTPUT"
+          else
+            echo "No wine binary found in PATH"
+            ls -l /usr/bin | grep -E '^.*wine' || true
+            exit 1
+          fi
+
+      - name: Verify Wine
+        run: |
+          "${{ steps.winebin.outputs.cmd }}" --version
 
       - name: Initialize Wine prefix
         run: |
           mkdir -p "$WINEPREFIX"
-          xvfb-run -a wine64 wineboot --init
+          xvfb-run -a "${{ steps.winebin.outputs.cmd }}" wineboot --init
           sleep 5
 
       - name: Install Windows Python in Wine
         run: |
           wget -O python-installer.exe "https://www.python.org/ftp/python/${PYTHON_VERSION_WIN}/python-${PYTHON_VERSION_WIN}-amd64.exe"
-          xvfb-run -a wine64 python-installer.exe /quiet InstallAllUsers=0 PrependPath=1 Include_test=0 Include_pip=1
+          xvfb-run -a "${{ steps.winebin.outputs.cmd }}" python-installer.exe /quiet InstallAllUsers=0 PrependPath=1 Include_test=0 Include_pip=1
           sleep 8
 
       - name: Verify Python in Wine
         run: |
-          xvfb-run -a wine64 cmd /c "python --version"
-          xvfb-run -a wine64 cmd /c "py --version" || true
+          xvfb-run -a "${{ steps.winebin.outputs.cmd }}" cmd /c "python --version"
+          xvfb-run -a "${{ steps.winebin.outputs.cmd }}" cmd /c "py --version" || true
 
       - name: Install build dependencies in Wine Python
         run: |
-          xvfb-run -a wine64 cmd /c "python -m pip install --upgrade pip"
-          xvfb-run -a wine64 cmd /c "python -m pip install pyinstaller==%PYINSTALLER_VERSION% wxPython reportlab lxml pillow"
+          xvfb-run -a "${{ steps.winebin.outputs.cmd }}" cmd /c "python -m pip install --upgrade pip"
+          xvfb-run -a "${{ steps.winebin.outputs.cmd }}" cmd /c "python -m pip install pyinstaller==%PYINSTALLER_VERSION% wxPython reportlab lxml pillow"
 
       - name: Build EXE with PyInstaller (in Wine)
         shell: bash
         run: |
           WIN_REPO_PATH=$(winepath -w "$GITHUB_WORKSPACE")
-          xvfb-run -a wine64 cmd /c "cd /d ${WIN_REPO_PATH} && python -m PyInstaller --noconfirm --clean --windowed --name trelby --add-data \"trelby\\resources;trelby\\resources\" --add-data \"trelby;trelby\" trelby.py"
+          xvfb-run -a "${{ steps.winebin.outputs.cmd }}" cmd /c "cd /d ${WIN_REPO_PATH} && python -m PyInstaller --noconfirm --clean --windowed --name trelby --add-data \"trelby\\resources;trelby\\resources\" --add-data \"trelby;trelby\" trelby.py"
 
       - name: Package build output
         run: |
