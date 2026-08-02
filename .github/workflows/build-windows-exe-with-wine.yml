@@ -1,0 +1,87 @@
+name: Build Windows EXE (Wine + PyInstaller)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref (branch/tag/SHA) to build"
+        required: false
+        default: ""
+      upload_artifact_name:
+        description: "Artifact name"
+        required: false
+        default: "trelby-windows-exe"
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-exe:
+    runs-on: ubuntu-latest
+    env:
+      WINEPREFIX: ${{ github.workspace }}/.wine
+      WINEARCH: win64
+      PYTHON_VERSION_WIN: "3.11.9"
+      PYINSTALLER_VERSION: "6.10.0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref != '' && inputs.ref || github.ref }}
+
+      - name: Install Linux dependencies (Wine + tools)
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            wine64 wine32 winbind xvfb cabextract unzip p7zip-full wget curl
+
+      - name: Initialize Wine
+        run: |
+          mkdir -p "$WINEPREFIX"
+          xvfb-run -a wineboot --init
+          sleep 5
+
+      - name: Install Windows Python in Wine
+        run: |
+          wget -O python-installer.exe "https://www.python.org/ftp/python/${PYTHON_VERSION_WIN}/python-${PYTHON_VERSION_WIN}-amd64.exe"
+          xvfb-run -a wine python-installer.exe /quiet InstallAllUsers=0 PrependPath=1 Include_test=0 Include_pip=1
+          sleep 5
+
+      - name: Verify Python in Wine
+        run: |
+          xvfb-run -a wine cmd /c "python --version && py --version"
+
+      - name: Install build dependencies in Wine Python
+        run: |
+          xvfb-run -a wine cmd /c "python -m pip install --upgrade pip"
+          xvfb-run -a wine cmd /c "python -m pip install pyinstaller==%PYINSTALLER_VERSION% wxPython reportlab lxml pillow"
+
+      - name: Build EXE with PyInstaller (in Wine)
+        shell: bash
+        run: |
+          # Convert Linux workspace path to Windows path for Wine tools
+          WIN_REPO_PATH=$(winepath -w "$GITHUB_WORKSPACE")
+
+          # Build command:
+          # - Use onedir for reliability
+          # - Keep data dirs bundled
+          xvfb-run -a wine cmd /c ^
+            "cd /d %WIN_REPO_PATH% && ^
+             python -m PyInstaller --noconfirm --clean --windowed --name trelby ^
+             --add-data \"trelby\\resources;trelby\\resources\" ^
+             --add-data \"trelby;trelby\" ^
+             trelby.py"
+
+      - name: Package build output
+        run: |
+          cd dist
+          zip -r "${{ inputs.upload_artifact_name }}.zip" trelby
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.upload_artifact_name }}
+          path: dist/${{ inputs.upload_artifact_name }}.zip
+          if-no-files-found: error
